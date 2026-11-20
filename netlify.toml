@@ -1,0 +1,8 @@
+# Used once the project is linked to a Git repo: Netlify installs dependencies,
+# syncs the proposal checkpoint and builds dist/ on every push.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"

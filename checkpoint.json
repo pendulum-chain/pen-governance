@@ -1,0 +1,24 @@
+{
+  "governor": "0xaa94c95C0A957F0Df291caA848cB4361E6B7b06E",
+  "scannedTo": "59944336",
+  "proposals": [
+    {
+      "id": "42553426648041251518990932052724234354310135972865935385700740654290818672947",
+      "proposer": "0xeFC6c20E3c48564b854e82277D28e0bE51a71101",
+      "targets": [
+        "0x0FC4A6FF1cDae34E1A481e4Da38D402dE0733955"
+      ],
+      "values": [
+        "0"
+      ],
+      "calldatas": [
+        "0xa9059cbb00000000000000000000000074f00d5ff15f0d2526792e5939e3bc45d445ce040000000000000000000000000000000000000000000000056bc75e2d63100000"
+      ],
+      "voteStart": "1795261646",
+      "voteEnd": "1795693646",
+      "description": "Governance test: symbolic transfer of 100 PEN from the treasury to itself (0x74F00d5ff15f0d2526792E5939e3bC45D445Ce04)",
+      "block": "59924352",
+      "tx": "0xd96671b47787084872c7e032674f00ee87a8fa0f03683cc90f28e144dfe239a1"
+    }
+  ]
+}
