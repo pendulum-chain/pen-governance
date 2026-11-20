@@ -47,6 +47,13 @@ function dur(sec: bigint | number): string {
   if (s >= 3600 && s % 3600 === 0) return `${s / 3600} hour${s === 3600 ? '' : 's'}`;
   return `${Math.round(s / 60)} minutes`;
 }
+// Mixed-case addresses must carry a correct EIP-55 checksum, which catches typos; single-case ones carry none.
+const CHECKSUM_HINT = 'Its upper and lower case letters don\'t match its checksum, which usually means a typo. Copy it again.';
+function addressProblem(s: string): string | null {
+  if (!isAddress(s, { strict: false })) return 'Enter 0x and 40 hex characters.';
+  const hex = s.slice(2);
+  return hex === hex.toLowerCase() || hex === hex.toUpperCase() || isAddress(s) ? null : CHECKSUM_HINT;
+}
 const same = (a: string | null | undefined, b: string | null | undefined): boolean => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 const link = (path: string, text: string): string => `<a href="${CONFIG.explorer}/${path}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 
@@ -424,7 +431,8 @@ function buildDraft() {
   d.actions.forEach((a, i) => {
     const n = i + 1;
     const to = a.to.trim();
-    if (!isAddress(to, { strict: false })) { errors.push(`Action ${n}: enter a valid ${a.type === 'call' ? 'contract' : 'recipient'} address (0x and 40 hex characters).`); return; }
+    const problem = addressProblem(to);
+    if (problem) { errors.push(`Action ${n}: check the ${a.type === 'call' ? 'contract' : 'recipient'} address. ${problem}`); return; }
     const addrTo = getAddress(to);
     if (a.type === 'pen') {
       const amt = parseAmount(a.amount, n, false); if (amt === null) return;
@@ -641,7 +649,8 @@ const actions: Record<string, (el: HTMLElement) => unknown> = {
   'delegate-close'() { S.delegateOpen = false; renderMe(); },
   'delegate-submit'() {
     const to = S.delegateTo.trim();
-    if (!isAddress(to, { strict: false })) return toast('bad', 'Enter the address to delegate to: 0x and 40 hex characters.');
+    const problem = addressProblem(to);
+    if (problem) return toast('bad', `Check the address to delegate to. ${problem}`);
     run('delegate-submit:', 'Delegate', { address: CONFIG.token, abi: tokenAbi, functionName: 'delegate', args: [getAddress(to)] },
       () => { S.delegateOpen = false; S.delegateTo = ''; });
   },
