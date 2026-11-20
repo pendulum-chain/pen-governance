@@ -4,6 +4,7 @@
 // Usage: node build.ts            (sync + build)
 //        node build.ts --no-sync  (build from the existing checkpoint, offline)
 // Node 22.18+ runs TypeScript directly by stripping the types; `npm run build` type-checks first.
+import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -64,10 +65,14 @@ const output = bundle.outputFiles?.[0];
 if (!output) throw new Error('esbuild produced no output');
 const js = output.text.replace(/<\/script/gi, '<\\/script');
 
-// Allows https RPC and wallet connections and inline code only; blocks external scripts, plugins, <base> and form posts.
+// Runs only the bundled app script (pinned by its hash, so injected inline code can't execute) and talks only to the
+// configured RPCs. Wallet extensions are unaffected: they answer through the injected provider, not page requests.
+// Styles stay inline (the vote bars set widths); images are data: URIs (favicon, EIP-6963 wallet icons).
+const scriptHash = createHash('sha256').update(js, 'utf8').digest('base64');
+const rpcOrigins = [...new Set(CONFIG.rpcs.map((url) => new URL(url).origin))];
 const csp = [
-  "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:", "connect-src 'self' https: wss:", "object-src 'none'", "base-uri 'none'", "form-action 'none'",
+  "default-src 'self'", `script-src 'sha256-${scriptHash}'`, "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:", `connect-src ${rpcOrigins.join(' ')}`, "object-src 'none'", "base-uri 'none'", "form-action 'none'",
 ].join('; ');
 
 const template = await readFile(new URL('./index.html', import.meta.url), 'utf8');
