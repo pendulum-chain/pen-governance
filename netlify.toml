@@ -1,4 +1,4 @@
-# Used once the project is linked to a Git repo: Netlify installs dependencies,
+# Netlify installs dependencies, type-checks,
 # syncs the proposal checkpoint and builds dist/ on every push.
 [build]
   command = "npm run build"

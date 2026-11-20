@@ -1,6 +1,6 @@
 # PEN Governance
 
-A one-page governance UI for PEN on Base. It replaces the Basescan "Write Contract" steps with buttons:
+A one-page governance UI for PEN on Base, live at https://governance.pendulumchain.org. It replaces the Basescan "Write Contract" steps with buttons:
 
 - **Delegate** to yourself or to another address, so your PEN counts in votes
 - **Propose**: send PEN or ETH from the treasury, or any custom contract call, with a title and description
@@ -31,9 +31,11 @@ npm run serve    # http://localhost:5173
 
 `npm run typecheck` only runs the type checker. `npm run build:offline` rebuilds from the existing checkpoint without network access.
 
-## Host it
+## Hosting
 
-`dist/index.html` is a single self-contained file (app, viem and proposal checkpoint inlined; no CDN or font requests). Put it on any static host: Netlify, Cloudflare Pages, GitHub Pages or IPFS. Wallet extensions only connect on `http(s)://` pages, not `file://`. It can't run as a claude.ai Artifact, because that sandbox blocks RPC requests and wallet extensions.
+Netlify builds and deploys `main` on every push (see `netlify.toml`); `dist/_headers` sets the security headers there.
+
+`dist/index.html` is a single self-contained file (app, viem and proposal checkpoint inlined; no CDN or font requests), so any static host works as well, such as Cloudflare Pages, GitHub Pages or IPFS. Wallet extensions only connect on `http(s)://` pages, not `file://`.
 
 ## How proposals are found
 
