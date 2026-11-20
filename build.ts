@@ -1,47 +1,49 @@
 // Builds dist/index.html: one self-contained file with the app, viem and a checkpoint of known proposals.
 // 1. Syncs checkpoint.json with ProposalCreated events up to the latest block, so the page only scans newer blocks.
 // 2. Bundles src/app.js with esbuild and inlines it into index.html.
-// Usage: node build.mjs            (sync + build)
-//        node build.mjs --no-sync  (build from the existing checkpoint, offline)
+// Usage: node build.ts            (sync + build)
+//        node build.ts --no-sync  (build from the existing checkpoint, offline)
+// Node 22.18+ runs TypeScript directly by stripping the types; `npm run build` type-checks first.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { CONFIG } from './src/config.js';
-import { client, getProposalLogs } from './src/chain.js';
+import { CONFIG } from './src/config.ts';
+import { client, getProposalLogs, type Checkpoint, type StoredProposal } from './src/chain.ts';
 
 const CHECKPOINT = new URL('./checkpoint.json', import.meta.url);
 const OUT_DIR = new URL('./dist/', import.meta.url);
 
-async function syncCheckpoint() {
-  const cp = existsSync(CHECKPOINT)
+async function syncCheckpoint(): Promise<Checkpoint> {
+  const cp: Checkpoint = existsSync(CHECKPOINT)
     ? JSON.parse(await readFile(CHECKPOINT, 'utf8'))
     : { governor: CONFIG.governor, scannedTo: (CONFIG.governorDeployBlock - 1n).toString(), proposals: [] };
   if (process.argv.includes('--no-sync')) return cp;
   try {
     return await scanInto(cp);
   } catch (e) {
-    console.warn(`Checkpoint sync failed, building from the existing checkpoint: ${e.shortMessage || e.message}`);
+    const err = e as { shortMessage?: string; message?: string };
+    console.warn(`Checkpoint sync failed, building from the existing checkpoint: ${err.shortMessage || err.message}`);
     return cp;
   }
 }
 
-async function scanInto(cp) {
+async function scanInto(cp: Checkpoint): Promise<Checkpoint> {
   const latest = (await client.getBlockNumber()) - 10n; // stay a few blocks behind the head
   const from = BigInt(cp.scannedTo) + 1n;
-  const ranges = [];
+  const ranges: [bigint, bigint][] = [];
   for (let f = from; f <= latest; f += CONFIG.logRange) {
     const t = f + CONFIG.logRange - 1n;
     ranges.push([f, t > latest ? latest : t]);
   }
-  const byId = new Map(cp.proposals.map((p) => [p.id, p]));
+  const byId = new Map<string, StoredProposal>(cp.proposals.map((p) => [p.id, p]));
   for (let i = 0; i < ranges.length; i += 6) {
     const batch = await Promise.all(ranges.slice(i, i + 6).map(([f, t]) => getProposalLogs(f, t)));
     batch.flat().forEach((p) => byId.set(p.id, p));
     process.stdout.write(`\rScanning blocks ${from} → ${latest}: ${Math.min(i + 6, ranges.length)}/${ranges.length} ranges`);
   }
   if (ranges.length) process.stdout.write('\n');
-  const next = {
+  const next: Checkpoint = {
     governor: CONFIG.governor,
     scannedTo: (ranges.length ? latest : BigInt(cp.scannedTo)).toString(),
     proposals: [...byId.values()].sort((a, b) => Number(BigInt(a.block) - BigInt(b.block))),
@@ -54,11 +56,13 @@ async function scanInto(cp) {
 const checkpoint = await syncCheckpoint();
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('./src/app.js', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL('./src/app.ts', import.meta.url))],
   bundle: true, minify: true, format: 'iife', target: 'es2020', platform: 'browser',
   write: false, legalComments: 'none', logLevel: 'warning',
 });
-const js = bundle.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
+const output = bundle.outputFiles?.[0];
+if (!output) throw new Error('esbuild produced no output');
+const js = output.text.replace(/<\/script/gi, '<\\/script');
 
 // Allows https RPC and wallet connections and inline code only; blocks external scripts, plugins, <base> and form posts.
 const csp = [

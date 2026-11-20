@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
-    "build:offline": "node build.mjs --no-sync",
-    "serve": "node serve.mjs"
+    "typecheck": "tsc",
+    "build": "tsc && node build.ts",
+    "build:offline": "tsc && node build.ts --no-sync",
+    "serve": "node serve.ts"
   },
   "dependencies": {
-    "esbuild": "0.28.2",
     "viem": "2.57.14"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
   }
 }

@@ -11,9 +11,9 @@ export const CONFIG = {
   explorer: 'https://basescan.org',
   tokenSymbol: 'PEN',
   tokenDecimals: 18,
-};
+} as const;
 
-export const LABELS = {
+export const LABELS: Record<string, string> = {
   [CONFIG.token.toLowerCase()]: 'PEN token',
   [CONFIG.governor.toLowerCase()]: 'Governor',
   [CONFIG.timelock.toLowerCase()]: 'Treasury',

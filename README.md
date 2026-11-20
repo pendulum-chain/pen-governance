@@ -21,13 +21,15 @@ Settings are read live from the contracts. They currently are: voting delay 1 da
 
 ## Build and run
 
+Needs Node 22.18 or later (24 recommended, see `.nvmrc`), which runs the TypeScript build scripts directly.
+
 ```bash
 npm install
-npm run build    # syncs checkpoint.json with the chain, then writes dist/index.html
+npm run build    # type-checks, syncs checkpoint.json with the chain, then writes dist/index.html
 npm run serve    # http://localhost:5173
 ```
 
-`npm run build:offline` rebuilds from the existing checkpoint without network access.
+`npm run typecheck` only runs the type checker. `npm run build:offline` rebuilds from the existing checkpoint without network access.
 
 ## Host it
 
@@ -44,7 +46,7 @@ Each day between builds adds about 9 log requests to a first visit. Rebuild and 
 
 ## Configuration
 
-Addresses, RPC endpoints and the log range are in `src/config.js`. Change them and rebuild.
+Addresses, RPC endpoints and the log range are in `src/config.ts`. Change them and rebuild.
 
 ## Limits
 
@@ -55,8 +57,8 @@ Addresses, RPC endpoints and the log range are in `src/config.js`. Change them a
 ## Files
 
 - `index.html`: page shell and styles
-- `src/app.js`: rendering and interactions
-- `src/chain.js`: reads, proposal discovery, action decoding
-- `src/wallet.js`: wallet discovery (EIP-6963), network switching, simulate-then-send, error messages
-- `src/abi.js`, `src/config.js`: contract interfaces and addresses
-- `build.mjs`, `serve.mjs`: build and local server
+- `src/app.ts`: rendering and interactions
+- `src/chain.ts`: reads, proposal discovery, action decoding
+- `src/wallet.ts`: wallet discovery (EIP-6963), network switching, simulate-then-send, error messages
+- `src/abi.ts`, `src/config.ts`: contract interfaces and addresses
+- `build.ts`, `serve.ts`: build and local server

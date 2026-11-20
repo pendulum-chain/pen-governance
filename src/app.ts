@@ -1,82 +1,105 @@
-import { formatUnits, parseUnits, isAddress, getAddress, encodeFunctionData, isHex, zeroAddress, parseEventLogs } from 'viem';
-import { CONFIG, LABELS } from './config.js';
-import { governorAbi, tokenAbi, proposalCreatedEvent } from './abi.js';
+import {
+  formatUnits, parseUnits, isAddress, getAddress, encodeFunctionData, isHex, zeroAddress, parseEventLogs,
+  type Address, type Hex, type TransactionReceipt,
+} from 'viem';
+import { CONFIG, LABELS } from './config.ts';
+import { governorAbi, tokenAbi, proposalCreatedEvent } from './abi.ts';
 import {
   client, STATES, loadKnown, saveKnown, scanNewProposals, readAll, proposalArgs, proposalId,
   splitDescription, describeAction, fromLog,
-} from './chain.js';
-import { wallet, discoverWallets, listWallets, connect, reconnect, forget, onBase, switchToBase, send, explainError } from './wallet.js';
+  type Checkpoint, type Globals, type Known, type LiveProposal, type Me, type Part, type StoredProposal,
+} from './chain.ts';
+import {
+  wallet, discoverWallets, listWallets, connect, reconnect, forget, onBase, switchToBase, send, explainError,
+  type SendCall, type WalletEntry,
+} from './wallet.ts';
 
 /* ================= Formatting ================= */
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c] ?? c);
 const DEC = (1.5).toLocaleString().charAt(1);
-function amount(v, decimals = 18, maxFrac = 2) {
+function amount(v: bigint | undefined | null, decimals = 18, maxFrac = 2): string {
   if (v === undefined || v === null) return '–';
   const [i, f = ''] = formatUnits(v, decimals).split('.');
-  const int = BigInt(i).toLocaleString();
+  const int = BigInt(i ?? '0').toLocaleString();
   const frac = f.slice(0, maxFrac).replace(/0+$/, '');
   if (v > 0n && int === '0' && !frac) return `<0${DEC}${'0'.repeat(maxFrac - 1)}1`;
   return int + (frac ? DEC + frac : '');
 }
-const pen = (v) => `${amount(v)} PEN`;
-const eth = (v) => `${amount(v, 18, 6)} ETH`;
+const pen = (v: bigint | undefined): string => `${amount(v)} PEN`;
+const eth = (v: bigint | undefined): string => `${amount(v, 18, 6)} ETH`;
 const compactFmt = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
-const compact = (v) => (v === undefined ? '–' : compactFmt.format(Number(formatUnits(v, 18))));
-const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const compact = (v: bigint | undefined): string => (v === undefined ? '–' : compactFmt.format(Number(formatUnits(v, 18))));
+const short = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const dateFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-const when = (ts) => dateFmt.format(new Date(Number(ts) * 1000));
-const nowSec = () => BigInt(Math.floor(Date.now() / 1000));
-function rel(ts) {
+const when = (ts: bigint | number | string): string => dateFmt.format(new Date(Number(ts) * 1000));
+const nowSec = (): bigint => BigInt(Math.floor(Date.now() / 1000));
+function rel(ts: bigint | number | string): string {
   const s = Math.round(Number(ts) - Date.now() / 1000);
   const a = Math.abs(s);
   const d = Math.floor(a / 86400), h = Math.floor((a % 86400) / 3600), m = Math.floor((a % 3600) / 60);
   const txt = d ? `${d} d${h ? ` ${h} h` : ''}` : h ? `${h} h${m ? ` ${m} min` : ''}` : `${Math.max(m, 1)} min`;
   return s >= 0 ? `in ${txt}` : `${txt} ago`;
 }
-function dur(sec) {
+function dur(sec: bigint | number): string {
   const s = Number(sec);
   if (s >= 86400 && s % 86400 === 0) return `${s / 86400} day${s === 86400 ? '' : 's'}`;
   if (s >= 3600 && s % 3600 === 0) return `${s / 3600} hour${s === 3600 ? '' : 's'}`;
   return `${Math.round(s / 60)} minutes`;
 }
-const same = (a, b) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
-const link = (path, text) => `<a href="${CONFIG.explorer}/${path}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+const same = (a: string | null | undefined, b: string | null | undefined): boolean => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+const link = (path: string, text: string): string => `<a href="${CONFIG.explorer}/${path}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 
-function addr(a) {
+function addr(a: string): string {
   const label = LABELS[a.toLowerCase()] || (same(a, wallet.account) ? 'You' : '');
   const inner = label ? `${esc(label)} <span class="mono dim">${short(a)}</span>` : `<span class="mono">${short(a)}</span>`;
   return `<a class="addr" href="${CONFIG.explorer}/address/${esc(a)}" target="_blank" rel="noopener noreferrer" title="${esc(a)}">${inner}</a>`;
 }
-const seg = (p) => (typeof p === 'string' ? esc(p)
-  : p.addr ? addr(p.addr)
-  : p.pen !== undefined ? `<b>${pen(p.pen)}</b>`
-  : p.eth !== undefined ? `<b>${eth(p.eth)}</b>`
-  : p.dur !== undefined ? `<b>${dur(p.dur)}</b>` : '');
+const seg = (p: Part): string => (typeof p === 'string' ? esc(p)
+  : 'addr' in p ? addr(p.addr)
+  : 'pen' in p ? `<b>${pen(p.pen)}</b>`
+  : 'eth' in p ? `<b>${eth(p.eth)}</b>`
+  : `<b>${dur(p.dur)}</b>`);
 
-function btn(act, label, { id = '', cls = '', data = {}, disabled = false } = {}) {
+interface BtnOptions { id?: string; cls?: string; data?: Record<string, string | number>; disabled?: boolean }
+function btn(act: string, label: string, { id = '', cls = '', data = {}, disabled = false }: BtnOptions = {}): string {
   const attrs = Object.entries(data).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
   const busy = S.busy && S.busy.key === `${act}:${id}`;
-  const text = busy ? { check: 'Checking…', wallet: 'Confirm in wallet…', chain: 'Waiting for Base…' }[S.busy.phase] : label;
+  const text = busy && S.busy ? { check: 'Checking…', wallet: 'Confirm in wallet…', chain: 'Waiting for Base…' }[S.busy.phase] : label;
   return `<button type="button" class="btn ${cls}" id="act-${act}-${esc(id)}" data-act="${act}" data-id="${esc(id)}"${attrs}${disabled || S.busy ? ' disabled' : ''}>${esc(text)}</button>`;
 }
 
 /* ================= State ================= */
 
-let checkpoint = null;
-try { checkpoint = JSON.parse(document.getElementById('checkpoint').textContent); } catch { checkpoint = null; }
+let checkpoint: Checkpoint | null = null;
+try { checkpoint = JSON.parse(document.getElementById('checkpoint')?.textContent || 'null'); } catch { checkpoint = null; }
+
+interface DraftAction { type: 'pen' | 'eth' | 'call'; to: string; amount: string; data: string }
+interface Draft { title: string; body: string; actions: DraftAction[] }
 
 const DRAFT = 'pen-gov:draft';
-const emptyDraft = () => ({ title: '', body: '', actions: [{ type: 'pen', to: '', amount: '', data: '' }] });
+const emptyDraft = (): Draft => ({ title: '', body: '', actions: [{ type: 'pen', to: '', amount: '', data: '' }] });
 let draft = emptyDraft();
 try { draft = { ...emptyDraft(), ...JSON.parse(localStorage.getItem(DRAFT) || 'null') }; } catch { /* fresh draft */ }
 
-const S = {
+interface State {
+  known: Known;
+  globals: Globals | null; live: Map<string, LiveProposal>; me: Me | null; loadError: string | null;
+  scan: { running: boolean; done?: number; total?: number; failed?: number };
+  open: string | null; composing: boolean; draft: Draft;
+  reasons: Map<string, string>; rawOpen: Set<string>;
+  delegateOpen: boolean; delegateTo: string;
+  busy: { key: string; phase: 'check' | 'wallet' | 'chain' } | null;
+  toast: { kind: 'ok' | 'bad' | 'info'; text: string; hash?: string } | null;
+  picker: boolean;
+}
+
+const S: State = {
   known: loadKnown(checkpoint),
   globals: null, live: new Map(), me: null, loadError: null,
   scan: { running: false },
   open: null, composing: false, draft,
-  reasons: new Map(), rawOpen: new Set(),
+  reasons: new Map<string, string>(), rawOpen: new Set<string>(),
   delegateOpen: false, delegateTo: '',
   busy: null, toast: null, picker: false,
 };
@@ -86,18 +109,19 @@ const saveDraft = () => { try { localStorage.setItem(DRAFT, JSON.stringify(S.dra
 
 /* ================= Rendering ================= */
 
-const $ = (id) => document.getElementById(id);
+const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
 // Re-renders a region only when its markup changed, and keeps focus and caret in place.
-function setHTML(el, html) {
-  if (el._html === html) return;
-  const a = document.activeElement;
+const rendered = new WeakMap<HTMLElement, string>();
+function setHTML(el: HTMLElement | null, html: string): void {
+  if (!el || rendered.get(el) === html) return;
+  const a = document.activeElement as HTMLInputElement | null;
   const id = a && el.contains(a) ? a.id : null;
-  const sel = id && typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd] : null;
+  const sel = id && a && typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd ?? a.selectionStart] as const : null;
   el.innerHTML = html;
-  el._html = html;
+  rendered.set(el, html);
   if (id) {
-    const n = document.getElementById(id);
+    const n = document.getElementById(id) as HTMLInputElement | null;
     if (n) { n.focus({ preventScroll: true }); if (sel) try { n.setSelectionRange(sel[0], sel[1]); } catch { /* not a text field */ } }
   }
 }
@@ -165,40 +189,42 @@ function renderMe() {
 function renderScan() {
   const s = S.scan;
   let html = '';
-  if (s.running) html = `<span class="spin" aria-hidden="true"></span>Checking new blocks${s.total > 1 ? ` · ${Math.round((s.done / s.total) * 100)}%` : ''}`;
+  if (s.running) html = `<span class="spin" aria-hidden="true"></span>Checking new blocks${(s.total ?? 0) > 1 ? ` · ${Math.round(((s.done ?? 0) / (s.total ?? 1)) * 100)}%` : ''}`;
   else if (s.failed) html = `Some blocks couldn't be checked. ${btn('rescan', 'Retry', { cls: 'small' })}`;
   else if (S.known.scannedTo) html = `<span title="Searched up to block ${S.known.scannedTo.toLocaleString()}">Up to date</span>`;
   setHTML($('scan'), html);
 }
 
-function chip(state) {
+function chip(state: number | undefined): string {
   return state === undefined ? '<span class="chip">…</span>' : `<span class="chip s${state}">${STATES[state]}</span>`;
 }
 
-function timing(p, L) {
+type Live = Partial<LiveProposal>;
+
+function timing(p: StoredProposal, L: Live): string {
   const st = L.state;
   if (st === 0) return `Voting opens ${rel(p.voteStart)}`;
   if (st === 1) return `Voting closes ${rel(p.voteEnd)}`;
   if (st === 4) return 'Passed · ready to queue';
-  if (st === 5) return L.eta > nowSec() ? `Executable ${rel(L.eta)}` : 'Ready to execute';
+  if (st === 5) return (L.eta ?? 0n) > nowSec() ? `Executable ${rel(L.eta ?? 0n)}` : 'Ready to execute';
   if (st === 2) return 'Canceled by the proposer';
   if (st === 3 || st === 6 || st === 7) return `Voting closed ${when(p.voteEnd)}`;
   return '';
 }
 
-function voteBar(L) {
+function voteBar(L: Live): string {
   const f = L.for ?? 0n, a = L.against ?? 0n, ab = L.abstain ?? 0n, q = L.quorum ?? 0n;
   const total = f + a + ab;
   const scale = total > q ? total : q;
-  const pct = (x) => (scale ? Number((x * 10000n) / scale) / 100 : 0);
+  const pct = (x: bigint) => (scale ? Number((x * 10000n) / scale) / 100 : 0);
   const label = `For ${pen(f)}, Abstain ${pen(ab)}, Against ${pen(a)}. Quorum ${pen(q)} of For plus Abstain.`;
   return `<span class="bar" role="img" aria-label="${esc(label)}">`
     + `<span class="seg for" style="width:${pct(f)}%"></span><span class="seg abstain" style="width:${pct(ab)}%"></span><span class="seg against" style="width:${pct(a)}%"></span>`
     + (q ? `<span class="tick" style="left:${pct(q)}%"></span>` : '') + '</span>';
 }
 
-function card(p) {
-  const L = S.live.get(p.id) || {};
+function card(p: StoredProposal): string {
+  const L: Live = S.live.get(p.id) ?? {};
   const { title, body } = splitDescription(p.description);
   const open = S.open === p.id;
   return `<article class="prop${open ? ' open' : ''}" id="p-${p.id}">
@@ -214,8 +240,8 @@ function card(p) {
   </article>`;
 }
 
-function actionItem(p, i) {
-  const d = describeAction(p.targets[i], p.values[i], p.calldatas[i]);
+function actionItem(p: StoredProposal, i: number): string {
+  const d = describeAction(p.targets[i]!, p.values[i]!, p.calldatas[i]!);
   const key = `${p.id}:${i}`;
   return `<li><p>${d.parts.map(seg).join('')}</p>
     ${d.known ? '' : '<p class="note bad small">This page can\'t read this call. Check the target contract and the data on Basescan before you vote.</p>'}
@@ -225,12 +251,12 @@ function actionItem(p, i) {
     </details></li>`;
 }
 
-function results(p, L) {
+function results(L: Live): string {
   const f = L.for ?? 0n, a = L.against ?? 0n, ab = L.abstain ?? 0n, q = L.quorum;
   const total = f + a + ab;
-  const share = (x) => (total ? `${(Number((x * 1000n) / total) / 10).toLocaleString()}%` : '0%');
-  const width = (x) => (total ? Number((x * 10000n) / total) / 100 : 0);
-  const row = (name, cls, x) => `<div class="res-row"><span>${name}</span><span class="track"><span class="fill" style="width:${width(x)}%;background:var(--${cls})"></span></span><span class="num">${amount(x)}<span>${share(x)}</span></span></div>`;
+  const share = (x: bigint) => (total ? `${(Number((x * 1000n) / total) / 10).toLocaleString()}%` : '0%');
+  const width = (x: bigint) => (total ? Number((x * 10000n) / total) / 100 : 0);
+  const row = (name: string, cls: string, x: bigint) => `<div class="res-row"><span>${name}</span><span class="track"><span class="fill" style="width:${width(x)}%;background:var(--${cls})"></span></span><span class="num">${amount(x)}<span>${share(x)}</span></span></div>`;
   const counted = f + ab;
   let quorumLine = '';
   if (q !== undefined) {
@@ -248,13 +274,13 @@ function results(p, L) {
   return `<div class="res">${row('For', 'for', f)}${row('Against', 'against', a)}${row('Abstain', 'abstain', ab)}</div>${quorumLine}${verdict ? `<p class="verdict">${verdict}</p>` : ''}`;
 }
 
-function timeline(p, L) {
+function timeline(p: StoredProposal, L: Live): string {
   const g = S.globals;
   const now = nowSec();
   const start = BigInt(p.voteStart), end = BigInt(p.voteEnd);
   const created = g?.votingDelay !== undefined ? start - g.votingDelay : null;
-  const st = L.state;
-  const item = (label, t, state) => `<li class="${state}"><span>${label}</span>${t ? `<span class="t">${t}</span>` : ''}</li>`;
+  const st = L.state ?? -1; // unknown state: no step is current yet
+  const item = (label: string, t: string, state: string) => `<li class="${state}"><span>${label}</span>${t ? `<span class="t">${t}</span>` : ''}</li>`;
   const items = [];
   if (created !== null) items.push(item('Proposed', when(created), 'done'));
   items.push(item('Voting opens', `${when(start)} · ${rel(start)}`, now >= start ? 'done' : st === 0 ? 'now' : ''));
@@ -268,7 +294,7 @@ function timeline(p, L) {
   return `<ol class="tl">${items.join('')}</ol>`;
 }
 
-function yourPart(p, L) {
+function yourPart(p: StoredProposal, L: Live): string {
   const st = L.state;
   const id = p.id;
   const isProposer = same(p.proposer, wallet.account);
@@ -292,12 +318,13 @@ function yourPart(p, L) {
       <div class="row">${btn('vote', 'Vote For', { id: `${id}-1`, cls: 'vote-for', data: { pid: id, support: 1 } })}${btn('vote', 'Vote Against', { id: `${id}-0`, cls: 'vote-against', data: { pid: id, support: 0 } })}${btn('vote', 'Abstain', { id: `${id}-2`, cls: 'vote-abstain', data: { pid: id, support: 2 } })}</div>`;
   }
   if (st === 4) {
-    return `<h3>Queue for execution</h3><p class="small">The proposal passed. Any address can queue it, which starts the timelock delay${S.globals ? ` of ${esc(dur(S.globals.timelockDelay))}` : ''}. After that, anyone can execute it.</p>
+    return `<h3>Queue for execution</h3><p class="small">The proposal passed. Any address can queue it, which starts the timelock delay${S.globals?.timelockDelay !== undefined ? ` of ${esc(dur(S.globals.timelockDelay))}` : ''}. After that, anyone can execute it.</p>
       <div class="row">${wallet.account ? btn('queue', 'Queue proposal', { id, cls: 'primary' }) : btn('connect', 'Connect wallet to queue', { cls: 'primary', id: `q${id}` })}</div>`;
   }
   if (st === 5) {
-    const ready = L.eta && L.eta <= nowSec();
-    return `<h3>Execute</h3><p class="small">${ready ? 'The timelock delay is over. Any address can execute the proposal now.' : `Queued. Executable from ${esc(when(L.eta))} (${esc(rel(L.eta))}).`}</p>
+    const eta = L.eta ?? 0n;
+    const ready = eta > 0n && eta <= nowSec();
+    return `<h3>Execute</h3><p class="small">${ready ? 'The timelock delay is over. Any address can execute the proposal now.' : `Queued. Executable from ${esc(when(eta))} (${esc(rel(eta))}).`}</p>
       <div class="row">${wallet.account ? btn('execute', 'Execute proposal', { id, cls: 'primary', disabled: !ready }) : btn('connect', 'Connect wallet to execute', { cls: 'primary', id: `e${id}` })}</div>`;
   }
   if (st === 7) return '<h3>Executed</h3><p class="small">The treasury carried out this proposal.</p>';
@@ -307,7 +334,7 @@ function yourPart(p, L) {
   return '<p class="small muted">Reading the proposal from Base…</p>';
 }
 
-function detail(p, L, body) {
+function detail(p: StoredProposal, L: Live, body: string): string {
   const n = p.targets.length;
   return `<div class="col">
       <div class="blk"><h3>If it passes, the treasury will</h3><ol class="actions">${p.targets.map((_, i) => actionItem(p, i)).join('')}</ol>
@@ -315,7 +342,7 @@ function detail(p, L, body) {
       ${body ? `<div class="blk"><h3>Description</h3><div class="desc">${esc(body)}</div></div>` : ''}
     </div>
     <div class="col">
-      <div class="blk"><h3>Votes</h3>${results(p, L)}</div>
+      <div class="blk"><h3>Votes</h3>${results(L)}</div>
       <div class="you">${yourPart(p, L)}</div>
       <div class="blk"><h3>Timeline</h3>${timeline(p, L)}</div>
     </div>
@@ -340,7 +367,7 @@ function renderProposals() {
 
 function renderParams() {
   const g = S.globals;
-  const v = (x, f) => (x === undefined || !g ? '…' : f(x));
+  const v = <T,>(x: T | undefined, f: (x: T) => string) => (x === undefined || !g ? '…' : f(x));
   const host = new URL(CONFIG.rpcs[0]).host;
   setHTML($('params'), `<section><h2>How voting works</h2><ul class="rules">
       <li>Creating a proposal needs <b>${v(g?.threshold, pen)}</b> of voting power.</li>
@@ -359,6 +386,7 @@ function renderParams() {
 function renderToast() {
   const el = $('toast');
   const t = S.toast;
+  if (!el) return;
   el.hidden = !t;
   if (!t) return;
   el.className = `toast ${t.kind || ''}`;
@@ -367,6 +395,7 @@ function renderToast() {
 
 function renderPicker() {
   const el = $('picker');
+  if (!el) return;
   el.hidden = !S.picker;
   if (!S.picker) return;
   const items = listWallets().map((w, i) => {
@@ -380,12 +409,12 @@ function renderPicker() {
 
 function buildDraft() {
   const d = S.draft;
-  const errors = [];
-  const targets = [], values = [], calldatas = [];
+  const errors: string[] = [];
+  const targets: Address[] = [], values: bigint[] = [], calldatas: Hex[] = [];
   const title = d.title.trim();
   if (!title) errors.push('Add a title.');
   if (!d.actions.length) errors.push('Add at least one action.');
-  const parseAmount = (s, n, allowZero) => {
+  const parseAmount = (s: string, n: number, allowZero: boolean): bigint | null => {
     const t = s.trim().replace(/[\s_]/g, '');
     if (!/^\d+(\.\d{1,18})?$/.test(t)) { if (t || !allowZero) errors.push(`Action ${n}: enter an amount like 1000 or 0.5, without thousands separators.`); return t || !allowZero ? null : 0n; }
     const v = parseUnits(t, 18);
@@ -407,7 +436,7 @@ function buildDraft() {
       const amt = parseAmount(a.amount, n, true); if (amt === null) return;
       const data = a.data.trim() || '0x';
       if (!isHex(data) || data.length % 2) { errors.push(`Action ${n}: calldata must be hex starting with 0x.`); return; }
-      targets.push(addrTo); values.push(amt); calldatas.push(data.toLowerCase());
+      targets.push(addrTo); values.push(amt); calldatas.push(data.toLowerCase() as Hex);
     }
   });
   const description = d.body.trim() ? `# ${title}\n\n${d.body.trim()}` : `# ${title}`;
@@ -418,31 +447,31 @@ function buildDraft() {
 function composerPreview() {
   const b = buildDraft();
   const g = S.globals;
-  const checks = [];
-  const add = (cls, icon, text) => checks.push(`<li class="${cls}"><span class="i">${icon}</span><span>${text}</span></li>`);
+  const checks: string[] = [];
+  const add = (cls: string, icon: string, text: string) => checks.push(`<li class="${cls}"><span class="i">${icon}</span><span>${text}</span></li>`);
   b.errors.forEach((e) => add('no', '×', esc(e)));
   if (!wallet.account) add('no', '×', 'Connect a wallet to submit.');
-  else if (S.me && g) {
+  else if (S.me && g?.threshold !== undefined) {
     if (S.me.votes >= g.threshold) add('ok', '✓', `Your voting power, ${pen(S.me.votes)}, meets the ${pen(g.threshold)} needed to propose.`);
     else add('no', '×', `You have ${pen(S.me.votes)} of voting power; proposing needs ${pen(g.threshold)}. Delegate to yourself or ask holders to delegate to you.`);
   }
   if (!b.errors.length) {
-    if (S.known.proposals.has(b.id)) add('no', '×', 'A proposal with exactly these actions and description already exists. Change the description to propose again.');
+    if (b.id && S.known.proposals.has(b.id)) add('no', '×', 'A proposal with exactly these actions and description already exists. Change the description to propose again.');
     let penOut = 0n, ethOut = 0n;
     b.targets.forEach((t, i) => {
-      ethOut += b.values[i];
-      const d = describeAction(t, b.values[i], b.calldatas[i]);
-      const p = d.parts.find((x) => x && x.pen !== undefined);
-      if (same(t, CONFIG.token) && p && b.calldatas[i].startsWith('0xa9059cbb')) penOut += p.pen;
+      ethOut += b.values[i]!;
+      const d = describeAction(t, b.values[i]!, b.calldatas[i]!);
+      const p = d.parts.find((x): x is { pen: bigint } => typeof x !== 'string' && 'pen' in x);
+      if (same(t, CONFIG.token) && p && b.calldatas[i]!.startsWith('0xa9059cbb')) penOut += p.pen;
     });
-    if (g && penOut > g.treasuryPen) add('warn', '!', `The treasury holds ${pen(g.treasuryPen)} today; this sends ${pen(penOut)}. It needs enough PEN when the proposal executes, or execution fails.`);
-    if (g && ethOut > g.treasuryEth) add('warn', '!', `The treasury holds ${eth(g.treasuryEth)} today; this sends ${eth(ethOut)}. It needs enough ETH when the proposal executes.`);
+    if (g?.treasuryPen !== undefined && penOut > g.treasuryPen) add('warn', '!', `The treasury holds ${pen(g.treasuryPen)} today; this sends ${pen(penOut)}. It needs enough PEN when the proposal executes, or execution fails.`);
+    if (g?.treasuryEth !== undefined && ethOut > g.treasuryEth) add('warn', '!', `The treasury holds ${eth(g.treasuryEth)} today; this sends ${eth(ethOut)}. It needs enough ETH when the proposal executes.`);
   }
   const summary = b.errors.length ? '' : `<div class="blk"><h3>Voters will see</h3><ol class="actions">${b.targets.map((t, i) => {
-    const d = describeAction(t, b.values[i], b.calldatas[i]);
+    const d = describeAction(t, b.values[i]!, b.calldatas[i]!);
     return `<li><p>${d.parts.map(seg).join('')}</p>${d.known ? '' : '<p class="small muted">Shown as an unrecognized call. Explain it in the description.</p>'}</li>`;
   }).join('')}</ol></div>`;
-  const timing = g && !b.errors.length
+  const timing = g?.votingDelay !== undefined && g.votingPeriod !== undefined && b.id
     ? `<p class="small muted">If you submit now, voting opens about ${esc(when(nowSec() + g.votingDelay))} and closes about ${esc(when(nowSec() + g.votingDelay + g.votingPeriod))}. Proposal ID <code>${b.id.slice(0, 8)}…${b.id.slice(-6)}</code></p>`
     : '';
   const blocked = checks.some((c) => c.startsWith('<li class="no"'));
@@ -452,8 +481,10 @@ function composerPreview() {
 
 function renderComposer() {
   const el = $('composer');
+  const compose = $('act-compose');
+  if (!el || !compose) return;
   el.hidden = !S.composing;
-  $('act-compose').hidden = S.composing;
+  compose.hidden = S.composing;
   if (!S.composing) return;
   const d = S.draft;
   const acts = d.actions.map((a, i) => {
@@ -485,7 +516,7 @@ function renderPreviewOnly() { const el = $('c-preview'); if (el) setHTML(el, co
 
 /* ================= Data ================= */
 
-let refreshing = null, again = false;
+let refreshing: Promise<void> | null = null, again = false;
 async function refresh() {
   if (refreshing) { again = true; return refreshing; }
   refreshing = (async () => {
@@ -497,7 +528,8 @@ async function refresh() {
         if (account !== wallet.account) { again = true; continue; }
         S.globals = r.globals; S.live = r.live; S.me = r.me; S.loadError = null;
       } catch (e) {
-        S.loadError = e?.shortMessage || e?.message || 'Could not read from Base.';
+        const err = e as { shortMessage?: string; message?: string } | null;
+        S.loadError = err?.shortMessage || err?.message || 'Could not read from Base.';
       }
       render();
     } while (again);
@@ -526,27 +558,28 @@ async function scan() {
 
 /* ================= Transactions ================= */
 
-function toast(kind, text, hash) {
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(kind: 'ok' | 'bad' | 'info', text: string, hash?: string): void {
   S.toast = { kind, text, hash };
-  clearTimeout(toast.t);
-  if (kind === 'ok') toast.t = setTimeout(() => { S.toast = null; renderToast(); }, 9000);
+  clearTimeout(toastTimer);
+  if (kind === 'ok') toastTimer = setTimeout(() => { S.toast = null; renderToast(); }, 9000);
   renderToast();
 }
 
-async function run(key, label, call, after) {
+async function run(key: string, label: string, call: SendCall, after?: (receipt: TransactionReceipt) => void | Promise<void>): Promise<void> {
   if (S.busy) return;
   S.busy = { key, phase: 'check' };
   toast('info', `${label}: checking the transaction against Base…`);
   render();
   try {
     const { hash, receipt } = await send(call, {
-      onSimulated: () => { S.busy.phase = 'wallet'; toast('info', `${label}: confirm in your wallet.`); render(); },
-      onSigned: (h) => { S.busy.phase = 'chain'; toast('info', `${label}: sent. Waiting for Base to include it.`, h); render(); },
+      onSimulated: () => { if (S.busy) S.busy.phase = 'wallet'; toast('info', `${label}: confirm in your wallet.`); render(); },
+      onSigned: (h) => { if (S.busy) S.busy.phase = 'chain'; toast('info', `${label}: sent. Waiting for Base to include it.`, h); render(); },
     });
     toast('ok', `${label}: done.`, hash);
     await after?.(receipt);
   } catch (e) {
-    toast('bad', explainError(e, pen, call.functionName), e?.hash);
+    toast('bad', explainError(e, pen, call.functionName), (e as { hash?: string } | null)?.hash);
   } finally {
     S.busy = null;
     render();
@@ -556,7 +589,8 @@ async function run(key, label, call, after) {
 
 /* ================= Events ================= */
 
-async function doConnect(entry) {
+async function doConnect(entry: WalletEntry | undefined): Promise<void> {
+  if (!entry) return;
   S.picker = false;
   try {
     await connect(entry, onWalletChange);
@@ -571,35 +605,36 @@ async function doConnect(entry) {
 
 function onWalletChange() { S.me = null; S.delegateOpen = false; render(); refresh(); }
 
-function setOpen(id) {
+function setOpen(id: string | null): void {
   S.open = id;
   const url = id ? `#p-${id}` : location.pathname + location.search;
   history.replaceState(null, '', url);
   renderProposals();
 }
 
-const actions = {
+const actions: Record<string, (el: HTMLElement) => unknown> = {
   connect() {
     const list = listWallets();
     if (!list.length) return toast('bad', 'No browser wallet found. Install MetaMask, Rabby or Coinbase Wallet, or open this page in your wallet app\'s browser.');
     if (list.length === 1) return doConnect(list[0]);
     S.picker = true; renderPicker();
-    document.querySelector('#picker button[data-act="pick"]')?.focus();
+    document.querySelector<HTMLElement>('#picker button[data-act="pick"]')?.focus();
   },
   pick(el) { doConnect(listWallets()[Number(el.dataset.i)]); },
   'picker-close'() { S.picker = false; renderPicker(); },
   disconnect() { forget(); S.me = null; S.delegateOpen = false; render(); refresh(); },
   async switch() { try { await switchToBase(); } catch (e) { toast('bad', explainError(e, pen)); } render(); },
-  toggle(el) { setOpen(S.open === el.dataset.id ? null : el.dataset.id); },
+  toggle(el) { setOpen(S.open === el.dataset.id ? null : el.dataset.id ?? null); },
   'toast-close'() { S.toast = null; renderToast(); },
   reload() { refresh(); scan(); },
   rescan() { scan(); },
   async copy(el) {
-    const text = el.dataset.copy;
+    const text = el.dataset.copy ?? '';
     try { await navigator.clipboard.writeText(text); el.textContent = 'Copied'; } catch { el.textContent = 'Copy failed'; }
     setTimeout(() => { el.textContent = 'Copy ID'; }, 1400);
   },
   'delegate-self'() {
+    if (!wallet.account) return;
     run('delegate-self:', 'Delegate to yourself', { address: CONFIG.token, abi: tokenAbi, functionName: 'delegate', args: [wallet.account] });
   },
   'delegate-other'() { S.delegateOpen = true; renderMe(); $('delegate-to')?.focus(); },
@@ -611,13 +646,13 @@ const actions = {
       () => { S.delegateOpen = false; S.delegateTo = ''; });
   },
   vote(el) {
-    const id = el.dataset.pid;
+    const id = el.dataset.pid ?? '';
     const support = Number(el.dataset.support);
     const reason = (S.reasons.get(id) || '').trim();
-    const call = reason
+    const call: SendCall = reason
       ? { address: CONFIG.governor, abi: governorAbi, functionName: 'castVoteWithReason', args: [BigInt(id), support, reason] }
       : { address: CONFIG.governor, abi: governorAbi, functionName: 'castVote', args: [BigInt(id), support] };
-    run(`vote:${el.dataset.id}`, ['Vote Against', 'Vote For', 'Abstain'][support], call, () => S.reasons.delete(id));
+    run(`vote:${el.dataset.id}`, ['Vote Against', 'Vote For', 'Abstain'][support] ?? 'Vote', call, () => { S.reasons.delete(id); });
   },
   queue(el) { lifecycle(el.dataset.id, 'queue', 'Queue'); },
   execute(el) { lifecycle(el.dataset.id, 'execute', 'Execute'); },
@@ -644,40 +679,41 @@ const actions = {
   },
 };
 
-function lifecycle(id, fn, label) {
-  const p = S.known.proposals.get(id);
+function lifecycle(id: string | undefined, fn: 'queue' | 'execute' | 'cancel', label: string): void {
+  const p = id ? S.known.proposals.get(id) : undefined;
   if (!p) return;
   run(`${fn}:${id}`, label, { address: CONFIG.governor, abi: governorAbi, functionName: fn, args: proposalArgs(p) });
 }
 
 document.addEventListener('click', (e) => {
-  const el = e.target.closest('[data-act]');
-  if (!el || el.disabled) return;
-  const fn = actions[el.dataset.act];
+  const el = (e.target as Element | null)?.closest<HTMLElement>('[data-act]');
+  if (!el || (el as HTMLButtonElement).disabled) return;
+  const fn = actions[el.dataset.act ?? ''];
   if (fn) { e.preventDefault(); fn(el); }
 });
 
 document.addEventListener('input', (e) => {
-  const el = e.target;
+  const el = e.target as HTMLInputElement;
   const b = el.dataset?.bind;
   if (!b) return;
-  const i = Number(el.dataset.i);
-  if (b === 'reason') { S.reasons.set(el.dataset.id, el.value); return; }
+  const action = S.draft.actions[Number(el.dataset.i)];
+  if (b === 'reason') { S.reasons.set(el.dataset.id ?? '', el.value); return; }
   if (b === 'delegate-to') { S.delegateTo = el.value; return; }
   if (b === 'c-title') S.draft.title = el.value;
   else if (b === 'c-body') S.draft.body = el.value;
-  else if (b === 'a-to') S.draft.actions[i].to = el.value;
-  else if (b === 'a-amt') S.draft.actions[i].amount = el.value;
-  else if (b === 'a-data') S.draft.actions[i].data = el.value;
-  else if (b === 'a-type') { S.draft.actions[i].type = el.value; saveDraft(); renderComposer(); return; }
+  else if (b === 'a-to' && action) action.to = el.value;
+  else if (b === 'a-amt' && action) action.amount = el.value;
+  else if (b === 'a-data' && action) action.data = el.value;
+  else if (b === 'a-type' && action) { action.type = el.value as DraftAction['type']; saveDraft(); renderComposer(); return; }
   saveDraft();
   renderPreviewOnly();
 });
 
 document.addEventListener('toggle', (e) => {
-  const key = e.target?.dataset?.key;
+  const details = e.target as HTMLDetailsElement;
+  const key = details?.dataset?.key;
   if (!key) return;
-  if (e.target.open) S.rawOpen.add(key); else S.rawOpen.delete(key);
+  if (details.open) S.rawOpen.add(key); else S.rawOpen.delete(key);
 }, true);
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.picker) { S.picker = false; renderPicker(); } });

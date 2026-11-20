@@ -25,7 +25,7 @@ const ERRORS = [
   'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
   'error ERC5805FutureLookup(uint256 timepoint, uint48 clock)',
   'error VotesExpiredSignature(uint256 expiry)',
-];
+] as const;
 
 export const governorAbi = parseAbi([
   'function votingDelay() view returns (uint256)',
@@ -73,7 +73,7 @@ export const timelockAbi = parseAbi([
 ]);
 
 export const multicallAbi = parseAbi(['function getEthBalance(address addr) view returns (uint256 balance)']);
-export const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
+export const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11' as const;
 
 export const proposalCreatedEvent = parseAbiItem(
   'event ProposalCreated(uint256 proposalId, address proposer, address[] targets, uint256[] values, string[] signatures, bytes[] calldatas, uint256 voteStart, uint256 voteEnd, string description)'
