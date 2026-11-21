@@ -35,7 +35,7 @@ npm run serve    # http://localhost:5173
 
 Netlify builds and deploys `main` on every push (see `netlify.toml`); `dist/_headers` sets the security headers there.
 
-`dist/index.html` is a single self-contained file (app, viem and proposal checkpoint inlined; no CDN or font requests), so any static host works as well, such as Cloudflare Pages, GitHub Pages or IPFS. Wallet extensions only connect on `http(s)://` pages, not `file://`.
+`dist/` holds `index.html` (app, viem and proposal checkpoint inlined; no CDN requests) and the Pendulum brand fonts (Outfit and Nunito Sans from `@fontsource`, OFL-licensed, served from the same site), so any static host works as well, such as Cloudflare Pages, GitHub Pages or IPFS. Wallet extensions only connect on `http(s)://` pages, not `file://`.
 
 ## How proposals are found
 
@@ -58,7 +58,7 @@ Addresses, RPC endpoints and the log range are in `src/config.ts`. Change them a
 
 ## Files
 
-- `index.html`: page shell and styles
+- `index.html`: page shell, styles in the Pendulum brand colors and the official logo
 - `src/app.ts`: rendering and interactions
 - `src/chain.ts`: reads, proposal discovery, action decoding
 - `src/wallet.ts`: wallet discovery (EIP-6963), network switching, simulate-then-send, error messages

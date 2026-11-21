@@ -62,6 +62,12 @@ function addr(a: string): string {
   const inner = label ? `${esc(label)} <span class="mono dim">${short(a)}</span>` : `<span class="mono">${short(a)}</span>`;
   return `<a class="addr" href="${CONFIG.explorer}/address/${esc(a)}" target="_blank" rel="noopener noreferrer" title="${esc(a)}">${inner}</a>`;
 }
+// A two-tone gradient derived from the address, like the avatars on other governance sites.
+function avatar(a: string): string {
+  const n = parseInt(a.slice(2, 10), 16) || 0;
+  const h1 = n % 360, h2 = (h1 + 50 + ((n >>> 9) % 140)) % 360;
+  return `<span class="av" style="background:linear-gradient(135deg,hsl(${h1} 72% 64%),hsl(${h2} 62% 42%))" aria-hidden="true"></span>`;
+}
 const seg = (p: Part): string => (typeof p === 'string' ? esc(p)
   : 'addr' in p ? addr(p.addr)
   : 'pen' in p ? `<b>${pen(p.pen)}</b>`
@@ -134,18 +140,26 @@ function setHTML(el: HTMLElement | null, html: string): void {
 }
 
 function render() {
-  renderWallet(); renderMe(); renderComposer(); renderScan(); renderProposals(); renderParams(); renderToast(); renderPicker();
+  renderWallet(); renderFacts(); renderMe(); renderComposer(); renderScan(); renderProposals(); renderParams(); renderToast(); renderPicker();
 }
 
 function renderWallet() {
   let html;
   if (!wallet.account) html = btn('connect', 'Connect wallet', { cls: 'primary' });
   else {
-    html = `<span class="acct" title="${esc(wallet.account)}"><span class="dot${onBase() ? '' : ' bad'}"></span><span class="mono">${short(wallet.account)}</span></span>`
+    html = `<span class="acct" title="${esc(wallet.account)}">${avatar(wallet.account)}<span class="mono">${short(wallet.account)}</span></span>`
       + (onBase() ? '' : btn('switch', 'Switch to Base', { cls: 'warn small' }))
       + btn('disconnect', 'Disconnect', { cls: 'ghost small' });
   }
   setHTML($('wallet'), html);
+}
+
+function renderFacts() {
+  const g = S.globals;
+  const unit = (v: bigint | undefined) => (v === undefined ? '…' : `${amount(v)}<span class="unit">PEN</span>`);
+  const fact = (label: string, value: string) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
+  setHTML($('facts'), fact('Treasury', unit(g?.treasuryPen)) + fact('Quorum', unit(g?.quorumNow))
+    + fact('Needed to propose', unit(g?.threshold)) + fact('Voting period', g?.votingPeriod === undefined ? '…' : dur(g.votingPeriod)));
 }
 
 function renderMe() {
@@ -161,7 +175,7 @@ function renderMe() {
     const { balance, votes, delegate } = S.me;
     const none = !delegate || delegate === zeroAddress;
     const self = same(delegate, wallet.account);
-    const who = none ? 'Nobody yet' : self ? 'Yourself' : addr(delegate);
+    const who = none ? 'Nobody yet' : `<span class="who-line">${avatar(delegate)}${self ? 'Yourself' : addr(delegate)}</span>`;
     const notes = [];
     if (none && balance > 0n) {
       notes.push(`<div class="note warn"><p><strong>Your PEN doesn't count in votes yet.</strong> Delegate it to yourself to turn on your voting power. It's one transaction, and PEN you receive later counts automatically.</p>
@@ -236,11 +250,15 @@ function card(p: StoredProposal): string {
   const open = S.open === p.id;
   return `<article class="prop${open ? ' open' : ''}" id="p-${p.id}">
     <button type="button" class="prop-head" id="act-toggle-${p.id}" data-act="toggle" data-id="${p.id}" aria-expanded="${open}">
-      <span class="prop-top">${chip(L.state)}<span class="prop-time">${esc(timing(p, L))}</span></span>
-      <span class="prop-title">${esc(title)}</span>
-      ${voteBar(L)}
-      <span class="prop-meta">
-        <span class="k for">For <b>${compact(L.for)}</b></span><span class="k against">Against <b>${compact(L.against)}</b></span><span class="k abstain">Abstain <b>${compact(L.abstain)}</b></span><span class="k q">Quorum ${compact(L.quorum)}</span>
+      <span class="prop-main">
+        <span class="prop-top">${chip(L.state)}<span class="prop-time">${esc(timing(p, L))}</span></span>
+        <span class="prop-title">${esc(title)}</span>
+        <span class="prop-by who-line">${avatar(p.proposer)}<span>Proposed by ${esc(LABELS[p.proposer.toLowerCase()] || (same(p.proposer, wallet.account) ? 'you' : short(p.proposer)))}</span></span>
+      </span>
+      <span class="prop-votes">
+        <span class="pv-line"><span class="k for">For <b>${compact(L.for)}</b></span><span class="k against">Against <b>${compact(L.against)}</b></span></span>
+        ${voteBar(L)}
+        <span class="pv-line"><span class="k abstain">Abstain <b>${compact(L.abstain)}</b></span><span class="k q">Quorum <b>${compact(L.quorum)}</b></span></span>
       </span>
     </button>
     ${open ? `<div class="prop-body">${detail(p, L, body)}</div>` : ''}
@@ -348,13 +366,13 @@ function detail(p: StoredProposal, L: Live, body: string): string {
         ${n > 1 ? '<p class="small muted">The actions run in this order, in one transaction. If one fails, none happen.</p>' : ''}</div>
       ${body ? `<div class="blk"><h3>Description</h3><div class="desc">${esc(body)}</div></div>` : ''}
     </div>
-    <div class="col">
+    <div class="col side">
       <div class="blk"><h3>Votes</h3>${results(L)}</div>
       <div class="you">${yourPart(p, L)}</div>
       <div class="blk"><h3>Timeline</h3>${timeline(p, L)}</div>
     </div>
     <p class="d-foot"><span>Proposal ID <code title="${p.id}">${p.id.slice(0, 8)}…${p.id.slice(-6)}</code></span>${btn('copy', 'Copy ID', { id: `id-${p.id}`, cls: 'small', data: { copy: p.id } })}
-      <span>Proposed by ${addr(p.proposer)}</span><span>${link(`tx/${esc(p.tx)}`, 'Creation transaction ↗')}</span></p>`;
+      <span class="who-line">Proposed by ${avatar(p.proposer)}${addr(p.proposer)}</span><span>${link(`tx/${esc(p.tx)}`, 'Creation transaction ↗')}</span></p>`;
 }
 
 function renderProposals() {
@@ -387,7 +405,7 @@ function renderParams() {
       <tr><td>Governor</td><td>${link(`address/${CONFIG.governor}`, `<span class="mono break">${CONFIG.governor}</span>`)}</td></tr>
       <tr><td>Treasury</td><td>${link(`address/${CONFIG.timelock}`, `<span class="mono break">${CONFIG.timelock}</span>`)}<br><span class="muted">Holds ${v(g?.treasuryPen, pen)} and ${v(g?.treasuryEth, eth)}</span></td></tr>
     </tbody></table></section>
-    <p class="foot-note">Reads from ${esc(host)}. Every transaction is simulated against Base before your wallet asks you to sign it.</p>`);
+    <p class="foot-note"><svg class="logo" viewBox="0 0 190 49" fill="currentColor" aria-label="Pendulum" role="img"><use href="#pendulum-logo"/></svg><span>Reads from ${esc(host)}. Every transaction is simulated against Base before your wallet asks you to sign it.</span></p>`);
 }
 
 function renderToast() {
