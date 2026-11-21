@@ -1,11 +1,11 @@
 // Builds dist/index.html: one self-contained file with the app, viem and a checkpoint of known proposals.
 // 1. Syncs checkpoint.json with ProposalCreated events up to the latest block, so the page only scans newer blocks.
-// 2. Bundles src/app.js with esbuild and inlines it into index.html.
+// 2. Bundles src/app.ts with esbuild and inlines it into index.html, next to the self-hosted brand fonts.
 // Usage: node build.ts            (sync + build)
 //        node build.ts --no-sync  (build from the existing checkpoint, offline)
 // Node 22.18+ runs TypeScript directly by stripping the types; `npm run build` type-checks first.
 import { createHash } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -90,6 +90,16 @@ const headers = `/*
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
 `;
+
+// Brand fonts (Outfit, Nunito Sans), served from this site so no font CDN sees the visitors. OFL-licensed.
+const FONTS = new URL('./fonts/', OUT_DIR);
+await mkdir(FONTS, { recursive: true });
+for (const [pkg, files] of [['outfit', ['outfit-latin-500-normal', 'outfit-latin-600-normal']],
+  ['nunito-sans', ['nunito-sans-latin-400-normal', 'nunito-sans-latin-700-normal']]] as const) {
+  const dir = new URL(`./node_modules/@fontsource/${pkg}/`, import.meta.url);
+  for (const f of files) await copyFile(new URL(`./files/${f}.woff2`, dir), new URL(`./${f}.woff2`, FONTS));
+  await copyFile(new URL('./LICENSE', dir), new URL(`./${pkg}-LICENSE.txt`, FONTS));
+}
 
 await mkdir(OUT_DIR, { recursive: true });
 await writeFile(new URL('./index.html', OUT_DIR), html);
