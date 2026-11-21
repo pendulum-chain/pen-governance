@@ -64,3 +64,4 @@ Addresses, RPC endpoints and the log range are in `src/config.ts`. Change them a
 - `src/wallet.ts`: wallet discovery (EIP-6963), network switching, simulate-then-send, error messages
 - `src/abi.ts`, `src/config.ts`: contract interfaces and addresses
 - `build.ts`, `serve.ts`: build and local server
+- `assets/og-image.png`: the link preview for chats and social sites, rendered from `assets/og-image.html` (the render command is at the top of that file)

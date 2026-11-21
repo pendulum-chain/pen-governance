@@ -102,6 +102,7 @@ for (const [pkg, files] of [['outfit', ['outfit-latin-500-normal', 'outfit-latin
 }
 
 await mkdir(OUT_DIR, { recursive: true });
+await copyFile(new URL('./assets/og-image.png', import.meta.url), new URL('./og-image.png', OUT_DIR)); // link preview, see assets/og-image.html
 await writeFile(new URL('./index.html', OUT_DIR), html);
 await writeFile(new URL('./_headers', OUT_DIR), headers);
 console.log(`Built dist/index.html (${(html.length / 1024).toFixed(0)} KB)`);
